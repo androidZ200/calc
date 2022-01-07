@@ -8,20 +8,50 @@
 #include <numeric>
 #include <cstdlib>
 
-constexpr char* crutch = "-1";
 enum class Type {
-	Number, Operator, Open, Close, KeyWord, Parametr, Comma
+	Number, Operator, Open, Close, KeyWord, Parametr, Comma, Equal
 };
-struct Param {
-	std::string name;
-	double num;
-};
-const std::vector<std::string> keywords = {"exp", "sin", "cos", "ln", "tan", "asin", "acos", "atan", "atan2", "sqrt", "pow", "abs"};
-std::vector<Param> parametrs;
 struct Lexema {
 	std::string word;
 	Type type;
 };
+class SmartIterator {
+	std::vector<Lexema>::iterator iter;
+	std::vector<Lexema>::iterator end;
+
+public:
+	SmartIterator(const std::vector<Lexema>::iterator& iter, const std::vector<Lexema>::iterator& end) : iter(iter), end(end)
+	{	}
+
+	Lexema& operator*() {
+		if(is_end()) throw "unexpected ending";
+		return *iter;
+	}
+	Lexema* operator->() {
+		if(is_end()) throw "unexpected ending";
+		return &*iter;
+	}
+	bool is_end() {
+		return iter == end;
+	}
+	SmartIterator operator++() {
+		auto clone = *this;
+		++iter;
+		return clone;
+	}
+	SmartIterator& operator++(int) {
+		++iter;
+		return *this;
+	}
+	SmartIterator& go() {
+		++iter;
+		if(is_end()) throw "unexpected ending";
+		return *this;
+	}
+};
+double operator_low(SmartIterator &iter);
+double GET_RESULT(const std::string& line);
+
 bool is_void(char c) {
 	return c == ' ' || c == '\t' || c == '\n';
 }
@@ -31,11 +61,16 @@ bool is_digit(char c) {
 bool is_letter(char c) {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
+struct KeyWord {
+	std::string name;
+	double (*func)(SmartIterator& iter);
+};
+std::vector<KeyWord> keywords;
 bool is_keyword(std::string word) {
 	std::transform(word.begin(), word.end(), word.begin(),
 		[](unsigned char c){ return std::tolower(c); });
 	for(auto& x: keywords)
-		if(x == word) return true;
+		if(x.name == word) return true;
 	return false;
 }
 Lexema get_num(const char*& line) {
@@ -75,6 +110,11 @@ std::vector<Lexema>* read_line(const char* line) {
 			++line;
 			continue;
 		}
+		else if(*line == '=') {
+			magic_vector->push_back({std::string(line, 1), Type::Equal});
+			++line;
+			continue;
+		}
 		else if(*line == '+' || *line == '^' || *line == '*' || *line == '/') {
 			magic_vector->push_back({std::string(line, 1), Type::Operator});
 			++line;
@@ -102,7 +142,7 @@ std::vector<Lexema>* read_line(const char* line) {
 			else {
 				Lexema t = get_num(line);
 				if(t.word.size() == 1)
-					magic_vector->push_back({std::string(crutch, 2), Type::Number});
+					magic_vector->push_back({std::string("-1"), Type::Number});
 				else
 					magic_vector->push_back(t);
 
@@ -110,117 +150,261 @@ std::vector<Lexema>* read_line(const char* line) {
 			continue;
 		}
 		else {
-			throw "unknown character\n";
+			throw "unknown character";
 		}
 	}
 	return magic_vector;
 }
 double input_number(std::string name) {
-	double nans;
-	char *err;
-	do {
+	while(true) {
 		std::cout << name << " = ";
 		std::string ans;
 		std::getline(std::cin, ans);
-		nans = std::strtod(ans.c_str(), &err);
-	}while(*err != '\0' || errno != 0);
-	return nans;
+		try {
+			return GET_RESULT(ans);
+		}  catch (const char* mes) {
+			std::cerr << "Error: " << mes << "\n";
+		}
+	};
 }
-double get_param(std::string name) {
-	for(auto &x : parametrs)
-		if(x.name == name)
-			return x.num;
 
+enum class TypeParam {
+	Const, Blocked, Users
+};
+struct Param {
+	std::string name;
+	TypeParam type;
+	double num;
+};
+std::vector<Param> parametrs;
+void unblock_param(const std::string& name, double value) {
+	for(auto &x : parametrs)
+		if(x.name == name) {
+			x.type = TypeParam::Users;
+			x.num = value;
+		}
+}
+double get_param(const std::string& name) {
+	for(auto &x : parametrs)
+		if(x.name == name) {
+			if(x.type == TypeParam::Blocked) throw "you can't use this parametr";
+			return x.num;
+		}
+
+	parametrs.push_back({name, TypeParam::Blocked, 0});
 	double nans = input_number(name);
-	parametrs.push_back({name, nans});
+	unblock_param(name, nans);
 	return nans;
 }
 void add_param(Param p) {
 	for(auto &x : parametrs)
-		if(x.name == p.name)
-			throw "parametr " + p.name + " already exist\n";
+		if(x.name == p.name) {
+			if(p.type != TypeParam::Blocked)
+				throw "parametr " + p.name + " already exist";
+			else
+				x.type = TypeParam::Blocked;
+		}
 	parametrs.push_back(p);
 }
-void del_param(std::string name) {
+void del_param(const std::string& name) {
 	for(auto iter = parametrs.begin(); iter != parametrs.end(); iter++)
 		if((*iter).name == name) {
 			parametrs.erase(iter);
 			return;
 		}
 }
-
-double operator_low(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end);
-double op_exp(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return exp(a);
-}
-double op_sin(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return sin(a);
-}
-double op_cos(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return cos(a);
-}
-double op_ln(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(a <= 0) throw "argument of ln have to be more 0\n";
-	return log(a);
-}
-double op_tan(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return tan(a);
-}
-double op_asin(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(abs(a) > 1) throw "argument of asin have to be from -1 to 1\n";
-	return asin(a);
-}
-double op_acos(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(abs(a) > 1) throw "argument of acos have to be from -1 to 1\n";
-	return acos(a);
-}
-double op_atan(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return atan(a);
-}
-double op_atan2(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(iter == end) throw "unexpected ending\n";
-	if(iter->type != Type::Comma) throw "expected common\n";
-	iter++;
-	if(iter == end) throw "unexpected ending\n";
-	double b = operator_low(iter, end);
-	return atan2(a, b);
-}
-double op_sqrt(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(a < 0) throw "argument of sqrt have to be more 0\n";
-	return sqrt(a);
-}
-double op_pow(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	if(iter == end) throw "unexpected ending\n";
-	if(iter->type != Type::Comma) throw "expected common\n";
-	iter++;
-	if(iter == end) throw "unexpected ending\n";
-	double b = operator_low(iter, end);
-	return pow(a, b);
-}
-double op_abs(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_low(iter, end);
-	return abs(a);
+void change_param(const std::string& name, double value) {
+	for(auto &x : parametrs)
+		if(x.name == name) {
+			if(x.type == TypeParam::Users)
+				x.num = value;
+			else
+				throw "you can't change this parametr";
+		}
 }
 
-double operator_high(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end);
-double operator_brakets(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
+void fill_default_parametrs() {
+	add_param({"pi", TypeParam::Const, M_PIf64});
+	add_param({"e", TypeParam::Const, M_Ef64});
+	add_param({"inf", TypeParam::Const, std::numeric_limits<double>::infinity()});
+}
+void fill_keywords() {
+	keywords.push_back({"exp", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return exp(a);
+						}});
+	keywords.push_back({"sin", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return sin(a);
+						}});
+	keywords.push_back({"cos", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return cos(a);
+						}});
+	keywords.push_back({"ln", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(a <= 0) throw "argument of ln have to be more 0";
+							return log(a);
+						}});
+	keywords.push_back({"tan", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return tan(a);
+						}});
+	keywords.push_back({"asin", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(abs(a) > 1) throw "argument of asin have to be from -1 to 1";
+							return asin(a);
+						}});
+	keywords.push_back({"acos", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(abs(a) > 1) throw "argument of acos have to be from -1 to 1";
+							return acos(a);
+						}});
+	keywords.push_back({"atan", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return atan(a);
+						}});
+	keywords.push_back({"atan2", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							double b = operator_low(iter);
+							return atan2(a, b);
+						}});
+	keywords.push_back({"sqrt", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(a < 0) throw "argument of sqrt have to be more 0";
+							return sqrt(a);
+						}});
+	keywords.push_back({"pow", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							double b = operator_low(iter);
+							return pow(a, b);
+						}});
+	keywords.push_back({"abs", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							return a < 0 ? -a : a;
+						}});
+	keywords.push_back({"max", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							double b = operator_low(iter);
+							return a > b ? a : b;
+						}});
+	keywords.push_back({"min", [](SmartIterator& iter){
+							double a = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							double b = operator_low(iter);
+							return a < b ? a : b;
+						}});
+	keywords.push_back({"sum", [](SmartIterator& iter){
+							if(iter->type != Type::Parametr) throw "expected parametr";
+							std::string param_name = iter->word;
+							add_param({param_name, TypeParam::Blocked, 0});
+							iter.go();
+							if(iter->type != Type::Equal) throw "expected equal";
+							iter.go();
+							double beg = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							double end = operator_low(iter);
+							if(iter->type != Type::Comma) throw "expected common";
+							iter.go();
+							auto fixed = iter;
+							unblock_param(param_name, beg);
+							double sum = 0;
+							while (beg <= end) {
+								iter = fixed;
+								sum += operator_low(iter);
+								beg += 1;
+								change_param(param_name, beg);
+							}
+							del_param(param_name);
+							return sum;
+						}});
+}
+
+void help_function(int argc, char* argv[]) {
+	std::cout << "help info\n";
+}
+void multiline_mode() {
+	std::string line;
+	while (true) {
+		std::cout << ">> ";
+		std::getline(std::cin, line);
+		if (line == "exit") break;
+		try {
+			double res = GET_RESULT(line);
+			std::cout << "res = " << std::setprecision(15) << res << "\n";
+		}  catch (const char* mes) {
+			std::cerr << "Error: " << mes << "\n";
+		}
+	}
+}
+int main(int argc, char* argv[])
+{
+	if(argc == 1 || (argc > 1 && std::string(argv[1]) == "--help")) {
+		help_function(argc, argv);
+		return 0;
+	}
+
+	fill_default_parametrs();
+	fill_keywords();
+	if(argc == 2 && std::string(argv[1]) == "--multiline") {
+		multiline_mode();
+		return 0;
+	}
+	std::stringstream ss;
+	for(int i = 1; i < argc; i++)
+		ss << argv[i] << " ";
+	std::string line = ss.str();
+	try {
+		std::cout << std::setprecision(15) << GET_RESULT(line) << "\n";
+	}  catch (const char* mes) {
+		std::cerr << "Error: " << mes << "\n";
+		return 1;
+	}
+		return 0;
+}
+double GET_RESULT(const std::string& line) {
+	std::vector<Lexema>* magic_vector;
+	try {
+		magic_vector = read_line(line.c_str());
+		auto beg = magic_vector->begin();
+
+		bool ch_param_flag = false;
+		if(magic_vector->size() > 2 && (*magic_vector)[0].type == Type::Parametr &&
+		   (*magic_vector)[1].type == Type::Equal) {
+			add_param({(*magic_vector)[0].word, TypeParam::Blocked, 0});
+			beg += 2;
+			ch_param_flag = true;
+		}
+
+		SmartIterator si(beg, magic_vector->end());
+		double res = operator_low(si);
+
+		if(ch_param_flag)
+			unblock_param((*magic_vector)[0].word, res);
+
+		delete magic_vector;
+		return res;
+	}
+	catch (...) {
+		delete magic_vector;
+		throw;
+	}
+}
+
+double operator_high(SmartIterator &iter);
+double operator_brakets(SmartIterator &iter) {
 	if(iter->type == Type::Open) {
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
-		double a = operator_low(iter, end);
-		if(iter == end) throw "unexpected ending\n";
-		if(iter->type != Type::Close) throw "expected right braket\n";
+		iter.go();
+		double a = operator_low(iter);
+		if(iter->type != Type::Close) throw "expected right braket";
 		iter++;
 		return a;
 	}
@@ -230,118 +414,71 @@ double operator_brakets(std::vector<Lexema>::iterator &iter, std::vector<Lexema>
 	if(t->type == Type::Parametr) return get_param(t->word);
 	throw "incorrect input\n";
 }
-double operator_keyword(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
+double operator_keyword(SmartIterator &iter) {
 	if(iter->type == Type::KeyWord) {
 		auto t = iter;
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
-		if(iter->type != Type::Open) throw "expected left braket\n";
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
+		iter.go();
+		if(iter->type != Type::Open) throw "expected left braket";
+		iter.go();
 		double a = 0;
 
-		if(t->word == keywords[0]) a = op_exp(iter, end);
-		else if(t->word == keywords[1]) a = op_sin(iter, end);
-		else if(t->word == keywords[2]) a = op_cos(iter, end);
-		else if(t->word == keywords[3]) a = op_ln(iter, end);
-		else if(t->word == keywords[4]) a = op_tan(iter, end);
-		else if(t->word == keywords[5]) a = op_asin(iter, end);
-		else if(t->word == keywords[6]) a = op_acos(iter, end);
-		else if(t->word == keywords[7]) a = op_atan(iter, end);
-		else if(t->word == keywords[8]) a = op_atan2(iter, end);
-		else if(t->word == keywords[9]) a = op_sqrt(iter, end);
-		else if(t->word == keywords[10]) a = op_pow(iter, end);
-		else if(t->word == keywords[11]) a = op_abs(iter, end);
+		for(auto &x : keywords)
+			if(x.name == t->word) {
+				a = x.func(iter);
+				break;
+			}
 
-		if(iter == end) throw "unexpected ending\n";
-		if(iter->type != Type::Close) throw "expected right braket\n";
-		iter++;
+		if(iter->type != Type::Close) throw "expected right braket";
+		++iter;
 		return a;
 	}
-	return operator_brakets(iter, end);
+	return operator_brakets(iter);
 }
-double operator_mult(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
+double operator_mult(SmartIterator &iter) {
 	if(iter->type == Type::Number) {
 		auto t = iter;
-		iter++;
-		if(iter == end || iter->type == Type::Operator || iter->type == Type::Close || iter->type == Type::Comma)
+		++iter;
+		if(iter.is_end() || iter->type == Type::Operator || iter->type == Type::Close || iter->type == Type::Comma
+		   || iter->type == Type::Equal)
 			return atof(t->word.c_str());
 		else {
-			double b = operator_high(iter, end);
+			double b = operator_high(iter);
 			return atof(t->word.c_str()) * b;
 		}
 	}
-	return operator_keyword(iter, end);
+	return operator_keyword(iter);
 }
-double operator_pow(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double a = operator_mult(iter, end);
-	if(iter != end && iter->type == Type::Operator && iter->word == "^") {
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
-		double f = operator_mult(iter, end);
+double operator_pow(SmartIterator &iter) {
+	double a = operator_mult(iter);
+	if(!iter.is_end() && iter->type == Type::Operator && iter->word == "^") {
+		iter.go();
+		double f = operator_mult(iter);
 		a = pow(a, f);
 	}
 	return a;
 }
-double operator_high(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double mul = operator_pow(iter, end);
-	while(iter != end && iter->type == Type::Operator && (iter->word == "*" || iter->word == "/")) {
+double operator_high(SmartIterator &iter) {
+	double mul = operator_pow(iter);
+	while(!iter.is_end() && iter->type == Type::Operator && (iter->word == "*" || iter->word == "/")) {
 		bool mult = iter->word == "*";
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
-		double f = operator_pow(iter, end);
+		iter.go();
+		double f = operator_pow(iter);
 		if(mult) mul *= f;
 		else {
-			if(f == 0) throw "division by 0\n";
+			if(f == 0) throw "division by 0";
 			mul /= f;
 		}
 	}
 	return mul;
 }
-double operator_low(std::vector<Lexema>::iterator &iter, std::vector<Lexema>::iterator &end) {
-	double sum = operator_high(iter, end);
-	while(iter != end && iter->type == Type::Operator && (iter->word == "+" || iter->word == "-")) {
+double operator_low(SmartIterator &iter) {
+	double sum = operator_high(iter);
+	while(!iter.is_end() && iter->type == Type::Operator && (iter->word == "+" || iter->word == "-")) {
 		bool plus = iter->word == "+";
-		iter++;
-		if(iter == end) throw "unexpected ending\n";
-		double f = operator_high(iter, end);
+		iter.go();
+		double f = operator_high(iter);
 		if(plus) sum += f;
 		else sum -= f;
 	}
 	return sum;
-}
-
-void help_function(int argc, char* argv[]) {
-	std::cout << "help info\n";
-}
-int main(int argc, char* argv[])
-{
-	if(argc == 1 || (argc > 1 && std::string(argv[1]) == "--help")) {
-		help_function(argc, argv);
-		return 0;
-	}
-
-	parametrs.push_back({"pi", M_PIf64});
-	parametrs.push_back({"e", M_Ef64});
-	parametrs.push_back({"inf", std::numeric_limits<double>::infinity()});
-	std::stringstream ss;
-	for(int i = 1; i < argc; i++)
-		ss << argv[i] << " ";
-	std::string line = ss.str();
-	std::vector<Lexema>* magic_vector;
-	try {
-		magic_vector = read_line(line.c_str());
-		auto iter = magic_vector->begin();
-		auto end = magic_vector->end();
-		double res = operator_low(iter, end);
-		std::cout << std::setprecision(18) << res << "\n";
-		delete magic_vector;
-	}
-	catch (const char* text) {
-		std::cerr << "Error: " << text << "\n";
-		delete magic_vector;
-		return 1;
-	}
-
-	return 0;
 }

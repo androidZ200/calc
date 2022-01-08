@@ -187,7 +187,7 @@ void unblock_param(const std::string& name, double value) {
 double get_param(const std::string& name) {
 	for(auto &x : parametrs)
 		if(x.name == name) {
-			if(x.type == TypeParam::Blocked) throw "you can't use this parametr";
+			if(x.type == TypeParam::Blocked) throw "you can't use this parameter";
 			return x.num;
 		}
 
@@ -199,8 +199,8 @@ double get_param(const std::string& name) {
 void add_param(Param p) {
 	for(auto &x : parametrs)
 		if(x.name == p.name) {
-			if(p.type != TypeParam::Blocked)
-				throw "parametr " + p.name + " already exist";
+			if(p.type != TypeParam::Blocked || x.type == TypeParam::Const)
+				throw "parameter " + p.name + " already exist";
 			else
 				x.type = TypeParam::Blocked;
 		}
@@ -219,7 +219,7 @@ void change_param(const std::string& name, double value) {
 			if(x.type == TypeParam::Users)
 				x.num = value;
 			else
-				throw "you can't change this parametr";
+				throw "you can't change this parameter";
 		}
 }
 
@@ -243,7 +243,7 @@ void fill_keywords() {
 						}});
 	keywords.push_back({"ln", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(a <= 0) throw "argument of ln have to be more 0";
+							if(a <= 0) throw "argument of ln must be greater than 0";
 							return log(a);
 						}});
 	keywords.push_back({"tan", [](SmartIterator& iter){
@@ -252,12 +252,12 @@ void fill_keywords() {
 						}});
 	keywords.push_back({"asin", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(abs(a) > 1) throw "argument of asin have to be from -1 to 1";
+							if(std::abs(a) > 1) throw "argument of asin must be from -1 to 1";
 							return asin(a);
 						}});
 	keywords.push_back({"acos", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(abs(a) > 1) throw "argument of acos have to be from -1 to 1";
+							if(std::abs(a) > 1) throw "argument of acos must be from -1 to 1";
 							return acos(a);
 						}});
 	keywords.push_back({"atan", [](SmartIterator& iter){
@@ -266,19 +266,19 @@ void fill_keywords() {
 						}});
 	keywords.push_back({"atan2", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							double b = operator_low(iter);
 							return atan2(a, b);
 						}});
 	keywords.push_back({"sqrt", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(a < 0) throw "argument of sqrt have to be more 0";
+							if(a < 0) throw "argument of sqrt mast be greater than 0";
 							return sqrt(a);
 						}});
 	keywords.push_back({"pow", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							double b = operator_low(iter);
 							return pow(a, b);
@@ -289,34 +289,35 @@ void fill_keywords() {
 						}});
 	keywords.push_back({"max", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							double b = operator_low(iter);
 							return a > b ? a : b;
 						}});
 	keywords.push_back({"min", [](SmartIterator& iter){
 							double a = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							double b = operator_low(iter);
 							return a < b ? a : b;
 						}});
 	keywords.push_back({"sum", [](SmartIterator& iter){
-							if(iter->type != Type::Parametr) throw "expected parametr";
+							if(iter->type != Type::Parametr) throw "a parameter is expected";
 							std::string param_name = iter->word;
 							add_param({param_name, TypeParam::Blocked, 0});
 							iter.go();
-							if(iter->type != Type::Equal) throw "expected equal";
+							if(iter->type != Type::Equal) throw "a equal is expected";
 							iter.go();
 							double beg = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							double end = operator_low(iter);
-							if(iter->type != Type::Comma) throw "expected common";
+							if(iter->type != Type::Comma) throw "a comma is expected";
 							iter.go();
 							auto fixed = iter;
 							unblock_param(param_name, beg);
 							double sum = 0;
+							operator_low(iter);
 							while (beg <= end) {
 								iter = fixed;
 								sum += operator_low(iter);
@@ -329,7 +330,58 @@ void fill_keywords() {
 }
 
 void help_function(int argc, char* argv[]) {
-	std::cout << "help info\n";
+	(void)argc;
+	(void)argv;
+	std::cout << "calc: built 08.01.2022\n";
+	std::cout << "Author: Soshnikov Daniil (c)\n\n";
+
+	std::cout << "Usage: calc [parametrs, expression]\n\n";
+
+	std::cout << "Simple console calculator, supports multi-line mode. The expression can\n"
+				 "be passed immediately as an argument to the calc command, some expressions\n"
+				 "are supported without double quotes, but for some you need to use double quotes,\n"
+				 "especially for those where there are brackets () or exponentiation ^.\n"
+				 "There are also built-in constants pi, exp and infiniti.\n\n";
+
+	std::cout << "Parametrs:\n";
+	std::cout << "  --help \t Displays information about this program.\n";
+	std::cout << "  --multiline \t Runs the program in multiline mode.\n";
+
+	std::cout << "\nConstants:\n";
+	std::cout << "  pi \t 3.14159265358979...\n";
+	std::cout << "  e \t 2.71828182845905...\n";
+	std::cout << "  inf \t double infinity.\n";
+
+	std::cout << "\nFunctions:\n";
+	std::cout << "  sin( expression )\n";
+	std::cout << "  cos( expression )\n";
+	std::cout << "  tan( expression ) \t\t sin( expression ) / cos( expression )\n";
+	std::cout << "  exp( expression ) \t\t e^expression\n";
+	std::cout << "  ln( expression ) \t\t Natural logarithm. The expression must be strictly \n"
+				 "\t\t\t\t greater than zero.\n";
+	std::cout << "  asin( expression ) \t\t arcsin. The expression must be from -1 to 1.\n";
+	std::cout << "  acos( expression ) \t\t arccos. The expression must be from -1 to 1.\n";
+	std::cout << "  atan( expression )\n";
+	std::cout << "  atan2( expression_1, expression_2 ) \t Similarly to atan( expression_1 / expression_2 ).\n";
+	std::cout << "  sqrt( expression ) \t\t Square root. The expression must be greater than zero.\n";
+	std::cout << "  pow( expression_1, expression_2 ) \t Raises the expression_1 to the power of the\n"
+				 "\t\t\t\t expression_2.\n";
+	std::cout << "  abs( expression ) \t\t The module of the expression.\n";
+	std::cout << "  min( expression_1, expression_2 ) \t A minimum of two expressions.\n";
+	std::cout << "  max( expression_1, expression_2 ) \t A maximum of two expressions.\n";
+	std::cout << "  sum( parameter = begining, end, expression(parameter) ) \t Calculates the sum of the\n"
+				 "\t\t\t\t expression depending on the parameter from begining to\n"
+				 "\t\t\t\t end in increments of 1\n\n";
+
+	std::cout << "In multiline mode, you can use the\n"
+				 "\"parameter = expression\"\n"
+				 "to construct it to update the parameter value.\n\n";
+
+	std::cout << "Examples:\n";
+	std::cout << "  calc pi\n";
+	std::cout << "  calc 3e - 8.5\n";
+	std::cout << "  calc \"sum(n = min(x, 0), max(x, 0), 1/2^n)\"\n";
+	std::cout << "  x = 5\n";
 }
 void multiline_mode() {
 	std::string line;
@@ -404,7 +456,7 @@ double operator_brakets(SmartIterator &iter) {
 	if(iter->type == Type::Open) {
 		iter.go();
 		double a = operator_low(iter);
-		if(iter->type != Type::Close) throw "expected right braket";
+		if(iter->type != Type::Close) throw "the right bracket is expected";
 		iter++;
 		return a;
 	}
@@ -418,7 +470,7 @@ double operator_keyword(SmartIterator &iter) {
 	if(iter->type == Type::KeyWord) {
 		auto t = iter;
 		iter.go();
-		if(iter->type != Type::Open) throw "expected left braket";
+		if(iter->type != Type::Open) throw "the left bracket is expected";
 		iter.go();
 		double a = 0;
 
@@ -428,7 +480,7 @@ double operator_keyword(SmartIterator &iter) {
 				break;
 			}
 
-		if(iter->type != Type::Close) throw "expected right braket";
+		if(iter->type != Type::Close) throw "the right bracket is expected";
 		++iter;
 		return a;
 	}
